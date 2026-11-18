@@ -960,6 +960,217 @@ tr.anomaly td.num { color: var(--red); font-weight: 600; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast i { width: 5px; height: 5px; border-radius: 99px; background: #4FC08D; }
 
+/* ============ 操作控件（CRUD） ============ */
+.panel-tools { display: flex; align-items: center; gap: 8px; }
+
+.btn-xs {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  gap: 4px;
+}
+.btn-xs svg { width: 11px; height: 11px; }
+
+.btn-sm { height: 28px; padding: 0 11px; font-size: 12px; }
+
+.segmented.mini { width: 100%; margin-bottom: 10px; padding: 2px; }
+.segmented.mini button { height: 23px; padding: 0 4px; font-size: 11px; flex: 1; }
+
+.ticket { width: 100%; display: block; position: relative; cursor: pointer; }
+.ticket-ops {
+  position: absolute;
+  top: 8px; right: 8px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.ticket:hover .ticket-ops { opacity: 1; }
+.ticket-op {
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border-radius: 5px;
+  color: var(--ink-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.ticket-op:hover { color: var(--ink); border-color: var(--line-strong); }
+.ticket-op.danger:hover { color: var(--red); border-color: var(--red-line); background: var(--red-soft); }
+.ticket-op svg { width: 11px; height: 11px; }
+
+.ticket-empty,
+.kb-empty {
+  padding: 34px 16px;
+  text-align: center;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.75;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+.ticket-empty b,
+.kb-empty b {
+  display: block;
+  color: var(--ink-2);
+  font-weight: 500;
+  font-size: 12.5px;
+  margin-bottom: 3px;
+}
+.kb-empty { grid-column: 1 / -1; padding: 56px 20px; }
+
+.kb-card { position: relative; cursor: pointer; }
+.kb-card .kb-tags { padding-right: 24px; }
+.kb-del {
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border-radius: 6px;
+  color: var(--ink-3);
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.kb-card:hover .kb-del { opacity: 1; }
+.kb-del:hover { background: var(--red-soft); color: var(--red); }
+.kb-del svg { width: 11px; height: 11px; }
+
+.st {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.st::before { content: ""; width: 4px; height: 4px; border-radius: 99px; background: currentColor; }
+.st-open { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); }
+.st-doing { background: var(--ai-soft); color: var(--ai-deep); border: 1px solid var(--ai-line); }
+.st-done { background: var(--green-soft); color: var(--green); border: 1px solid #D6E9E0; }
+.st-done::before { background: var(--green); }
+
+.current-ticket {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #FCFBF8;
+  padding: 11px 13px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ct-main { flex: 1; min-width: 0; }
+.ct-id { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+.ct-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ct-ops { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.ct-ops select {
+  height: 26px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 11.5px;
+  padding: 0 6px;
+  color: var(--ink-2);
+  outline: none;
+  cursor: pointer;
+}
+
+/* ============ 弹窗表单 ============ */
+.modal-mask {
+  position: fixed; inset: 0;
+  background: rgba(25, 23, 20, 0.3);
+  backdrop-filter: blur(2px);
+  z-index: 80;
+  animation: fadeIn 0.18s ease both;
+}
+.modal {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(468px, 92vw);
+  max-height: 88vh;
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: var(--shadow-3);
+  z-index: 81;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalIn 0.22s var(--ease) both;
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: translate(-50%, -48%) scale(0.99); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.modal-head {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-head h2 { font-size: 15px; font-weight: 600; }
+.modal-body { padding: 18px 22px; overflow-y: auto; }
+.modal-foot {
+  padding: 13px 22px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background: #FCFBF8;
+}
+
+.form-field { margin-bottom: 13px; }
+.form-field label {
+  display: block;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-bottom: 5px;
+}
+.form-field input[type="text"],
+.form-field textarea,
+.form-field select {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #FCFBF8;
+  padding: 8px 11px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
+}
+.form-field input[type="text"] { height: 36px; padding: 0 11px; }
+.form-field textarea { min-height: 74px; resize: vertical; line-height: 1.6; }
+.form-field input:focus,
+.form-field textarea:focus,
+.form-field select:focus {
+  border-color: var(--ai-line);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px rgba(74, 86, 196, 0.07);
+}
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.form-hint { font-size: 11px; color: var(--ink-3); margin-top: 5px; }
+.form-error { font-size: 11.5px; color: var(--red); margin-top: 6px; }
+
+.tag-picker { display: flex; flex-wrap: wrap; gap: 5px; }
+.tag-opt {
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.tag-opt.on { background: var(--ai-soft); border-color: var(--ai-line); color: var(--ai-deep); }
+
 /* ============ 响应式 ============ */
 @media (max-width: 1180px) {
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }

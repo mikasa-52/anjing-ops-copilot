@@ -61,6 +61,30 @@ DEEPSEEK_MODEL=deepseek-chat
 
 ---
 
+## 数据是真的会变的
+
+工单、知识库、变更记录都不是写死的数组。它们走服务端 REST 接口，持久化在 `data/store.json`，刷新、关掉再开都还在。
+
+| 能力 | 入口 |
+|---|---|
+| 新建工单 | 工单台右上角「新建」，填描述 / 部门 / 优先级 |
+| 编辑工单 | 工单条悬浮的铅笔图标，或详情条「编辑」 |
+| 状态流转 | 详情条下拉：待处理 → 处理中 → 已解决，每次变更写入操作记录 |
+| 删除工单 | 工单条悬浮的垃圾桶图标 |
+| 采纳 AI 结论 | 分诊结果底部「采纳并关闭工单」，会真的把状态改成已解决 |
+| 沉淀知识 | 分诊结果「沉淀为知识」，真的生成一条知识库条目 |
+| 知识库增删 | 「新建条目」/ 卡片右上角删除 |
+| 变更记录 | 切到「变更记录」页签，用「记录发布」新增 |
+| 重置 | 知识库页「重置数据」，恢复初始 12 条 |
+
+看板上的「待处理工单」会跟着这些操作实时变。
+
+接口一览（详见 `server.js`）：`GET/POST /api/tickets`、`PATCH/DELETE /api/tickets/:id`、`POST /api/reset`、`GET /api/stats`、`GET/POST /api/kb`、`DELETE /api/kb/:id`、`GET/POST /api/changes`。
+
+> 静态部署（GitHub Pages）没有后端时，前端自动降级到浏览器 localStorage，同样能增删改查，只是数据存在各自设备上、彼此不共享。
+
+---
+
 ## 部署到 GitHub Pages
 
 已部署地址：**https://mikasa-52.github.io/anjing-ops-copilot/**

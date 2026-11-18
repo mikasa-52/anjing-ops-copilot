@@ -14,6 +14,233 @@ function escapeHtml(str) {
 
 let AI_STATE = "fallback";
 
+/* ============ 数据层 ============
+ * api 模式：读写服务端 /api/*（真持久化，多人共享）
+ * local 模式：静态托管（GitHub Pages）无后端时降级到浏览器 localStorage
+ */
+const LS_KEY = "zhishou.demo.v1";
+
+const Store = {
+  mode: "api",
+  tickets: [],
+  kb: [],
+  changes: [],
+  filter: "all",
+  currentId: null,
+
+  async init() {
+    try {
+      const [t, k, c] = await Promise.all([
+        fetch("/api/tickets").then((r) => r.json()),
+        fetch("/api/kb").then((r) => r.json()),
+        fetch("/api/changes").then((r) => r.json())
+      ]);
+      if (!t.ok || !k.ok || !c.ok) throw new Error("api unavailable");
+      this.tickets = t.tickets || [];
+      this.kb = k.kb || [];
+      this.changes = c.changes || [];
+      this.mode = "api";
+    } catch {
+      this.mode = "local";
+      this.loadLocal();
+    }
+    this.currentId = this.tickets.length ? this.tickets[0].id : null;
+  },
+
+  loadLocal() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d && Array.isArray(d.tickets)) {
+          this.tickets = d.tickets;
+          this.kb = d.kb || [];
+          this.changes = d.changes || [];
+          return;
+        }
+      }
+    } catch {
+      /* 损坏则重建 */
+    }
+    const now = Date.now();
+    this.tickets = DATA.tickets.map((t, i) => ({
+      id: t.id,
+      title: t.title,
+      from: t.from,
+      pri: t.pri,
+      status: "open",
+      desc: "",
+      createdAt: now - (i + 1) * 2400000,
+      updatedAt: now - (i + 1) * 2400000,
+      history: []
+    }));
+    this.kb = DATA.kb.map((k) => ({ ...k }));
+    this.changes = DATA.changes.map((c) => ({ ...c, createdAt: now }));
+    this.persist();
+  },
+
+  persist() {
+    try {
+      localStorage.setItem(
+        LS_KEY,
+        JSON.stringify({ tickets: this.tickets, kb: this.kb, changes: this.changes })
+      );
+    } catch {
+      /* 隐私模式下忽略 */
+    }
+  },
+
+  async req(method, url, body) {
+    const r = await fetch(url, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined
+    });
+    return r.json();
+  },
+
+  async createTicket(data) {
+    if (this.mode === "api") {
+      const r = await this.req("POST", "/api/tickets", data);
+      if (!r.ok) throw new Error(r.error || "创建失败");
+      this.tickets.unshift(r.ticket);
+      return r.ticket;
+    }
+    const now = Date.now();
+    const ticket = {
+      id: "WX-" + (2483 + this.tickets.length),
+      title: data.title,
+      from: data.from || "未知部门",
+      pri: data.pri || "P2",
+      status: "open",
+      desc: data.desc || "",
+      createdAt: now,
+      updatedAt: now,
+      history: [{ at: now, action: "创建工单" }]
+    };
+    this.tickets.unshift(ticket);
+    this.persist();
+    return ticket;
+  },
+
+  async updateTicket(id, patch) {
+    if (this.mode === "api") {
+      const r = await this.req("PATCH", "/api/tickets/" + encodeURIComponent(id), patch);
+      if (!r.ok) throw new Error(r.error || "更新失败");
+      const i = this.tickets.findIndex((x) => x.id === id);
+      if (i >= 0) this.tickets[i] = r.ticket;
+      return r.ticket;
+    }
+    const t = this.tickets.find((x) => x.id === id);
+    if (!t) throw new Error("工单不存在");
+    Object.assign(t, patch, { updatedAt: Date.now() });
+    t.history = t.history || [];
+    if (patch.status) t.history.push({ at: Date.now(), action: "状态变更为 " + patch.status });
+    if (patch.note) t.history.push({ at: Date.now(), action: patch.note });
+    this.persist();
+    return t;
+  },
+
+  async deleteTicket(id) {
+    if (this.mode === "api") {
+      const r = await this.req("DELETE", "/api/tickets/" + encodeURIComponent(id));
+      if (!r.ok) throw new Error(r.error || "删除失败");
+    }
+    this.tickets = this.tickets.filter((x) => x.id !== id);
+    if (this.currentId === id) this.currentId = this.tickets[0] ? this.tickets[0].id : null;
+    this.persist();
+  },
+
+  async createKb(data) {
+    if (this.mode === "api") {
+      const r = await this.req("POST", "/api/kb", data);
+      if (!r.ok) throw new Error(r.error || "创建失败");
+      this.kb.unshift(r.item);
+      return r.item;
+    }
+    const item = {
+      id: "kb-" + Date.now().toString(36),
+      title: data.title,
+      desc: data.desc || "由工单沉淀，待补充正文。",
+      tags: data.tags && data.tags.length ? data.tags : ["待归类"],
+      refs: 0,
+      updated: new Date().toISOString().slice(5, 10),
+      ai: !!data.ai,
+      doc: data.doc || {
+        sections: [
+          { h: "适用场景", p: data.desc || "待补充。", type: "p" },
+          { h: "操作步骤", type: "ol", items: ["待补充具体步骤"] }
+        ]
+      }
+    };
+    this.kb.unshift(item);
+    this.persist();
+    return item;
+  },
+
+  async deleteKb(id) {
+    if (this.mode === "api") {
+      const r = await this.req("DELETE", "/api/kb/" + encodeURIComponent(id));
+      if (!r.ok) throw new Error(r.error || "删除失败");
+    }
+    this.kb = this.kb.filter((x) => x.id !== id);
+    this.persist();
+  },
+
+  async createChange(data) {
+    if (this.mode === "api") {
+      const r = await this.req("POST", "/api/changes", data);
+      if (!r.ok) throw new Error(r.error || "创建失败");
+      this.changes = r.changes || this.changes;
+      return r.item;
+    }
+    const item = {
+      date: new Date().toISOString().slice(5, 10),
+      version: data.version || "v2.4.2",
+      title: data.title,
+      by: data.by || "王恩泽 · 运维",
+      tag: data.tag === "已回滚" ? "已回滚" : "已发布",
+      checks: data.checks && data.checks.length ? data.checks : ["待补验证项"],
+      note: data.note || "",
+      createdAt: Date.now()
+    };
+    this.changes.unshift(item);
+    this.persist();
+    return item;
+  },
+
+  async reset() {
+    if (this.mode === "api") {
+      const r = await this.req("POST", "/api/reset");
+      if (!r.ok) throw new Error("重置失败");
+      this.tickets = r.tickets;
+      this.kb = r.kb;
+      this.changes = r.changes;
+    } else {
+      localStorage.removeItem(LS_KEY);
+      this.loadLocal();
+    }
+    this.currentId = this.tickets.length ? this.tickets[0].id : null;
+    this.filter = "all";
+  },
+
+  count(status) {
+    if (status === "all") return this.tickets.length;
+    return this.tickets.filter((t) => t.status === status).length;
+  },
+
+  visible() {
+    const list = this.filter === "all" ? this.tickets : this.tickets.filter((t) => t.status === this.filter);
+    return list;
+  },
+
+  current() {
+    return this.tickets.find((t) => t.id === this.currentId) || null;
+  }
+};
+
+const STATUS_TEXT = { open: "待处理", doing: "处理中", done: "已解决" };
+
 /* ============ 通用 UI ============ */
 let toastTimer = null;
 function toast(msg) {
@@ -104,19 +331,27 @@ function sparkline(values, tone) {
 }
 
 function renderKpi() {
+  const hasData = Store.tickets.length > 0;
+  const openCount = hasData ? Store.count("open") : Number(DATA.kpi[0].value);
+  const doingCount = hasData ? Store.count("doing") : 0;
+
   $("#kpiGrid").innerHTML = DATA.kpi
-    .map(
-      (k) => `
+    .map((k, i) => {
+      const value = i === 0 ? String(openCount) : k.value;
+      const label = i === 0 ? "待处理工单" : k.label;
+      const deltaText = i === 0 ? `其中 ${doingCount} 单处理中` : k.delta;
+      const tone = i === 0 ? "is-good" : k.tone === "good" ? "is-good" : "is-warn";
+      return `
     <div class="kpi">
-      <div class="kpi-label">${escapeHtml(k.label)}</div>
-      <div class="kpi-value">${escapeHtml(k.value)}<small>${escapeHtml(k.unit)}</small></div>
-      <div class="kpi-delta ${k.tone === "good" ? "is-good" : "is-warn"}">
-        <span>${escapeHtml(k.delta.split(" ")[0])}</span>
-        <b>${escapeHtml(k.delta.split(" ").slice(1).join(" "))}</b>
+      <div class="kpi-label">${escapeHtml(label)}</div>
+      <div class="kpi-value">${escapeHtml(value)}<small>${escapeHtml(k.unit)}</small></div>
+      <div class="kpi-delta ${tone}">
+        <span>${escapeHtml(deltaText.split(" ")[0])}</span>
+        <b>${escapeHtml(deltaText.split(" ").slice(1).join(" "))}</b>
       </div>
       ${sparkline(k.spark, k.tone)}
-    </div>`
-    )
+    </div>`;
+    })
     .join("");
 }
 
@@ -246,45 +481,297 @@ function renderRisks() {
 
   $$("[data-risk]").forEach((b) => {
     b.addEventListener("click", () => {
-      const t = DATA.tickets.find((x) => x.id === b.dataset.risk);
-      setRoute("tickets");
-      if (t) {
-        selectTicket(t.id);
-        $("#askInput").value = t.title;
+      const t = Store.tickets.find((x) => x.id === b.dataset.risk);
+      if (!t) {
+        toast("这条工单已被删除");
+        return;
       }
+      setRoute("tickets");
+      selectTicket(t.id);
     });
   });
 }
 
 /* ============ 工单台 ============ */
+function relTime(ts) {
+  if (!ts) return "";
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if (mins < 1) return "刚刚";
+  if (mins < 60) return mins + " 分钟前";
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + " 小时前";
+  const days = Math.floor(hrs / 24);
+  return days === 1 ? "昨天" : days + " 天前";
+}
+
 function renderTickets() {
-  $("#ticketItems").innerHTML = DATA.tickets
-    .map(
-      (t) => `
-    <button class="ticket" data-id="${t.id}">
-      <div class="ticket-top">
-        <span class="pri pri-${t.pri.toLowerCase()}">${t.pri}</span>
-        <span class="ticket-id">${t.id}</span>
-      </div>
-      <div class="ticket-title">${escapeHtml(t.title)}</div>
-      <div class="ticket-meta">${escapeHtml(t.from)} <i>·</i> ${escapeHtml(t.time)}</div>
-    </button>`
-    )
-    .join("");
+  const list = Store.visible();
+  const box = $("#ticketItems");
 
-  $("#ticketCount").textContent = DATA.tickets.length;
+  if (!list.length) {
+    box.innerHTML = `<div class="ticket-empty">
+      <b>这个分组下没有工单</b>
+      <span>换一个状态筛选，或点右上角「新建」提一条。</span>
+    </div>`;
+  } else {
+    box.innerHTML = list
+      .map(
+        (t) => `
+      <div class="ticket ${t.id === Store.currentId ? "is-active" : ""}" data-id="${t.id}">
+        <div class="ticket-top">
+          <span class="pri pri-${String(t.pri).toLowerCase()}">${t.pri}</span>
+          <span class="st st-${t.status}">${STATUS_TEXT[t.status] || "待处理"}</span>
+          <span class="ticket-id">${t.id}</span>
+        </div>
+        <div class="ticket-title">${escapeHtml(t.title)}</div>
+        <div class="ticket-meta">${escapeHtml(t.from)} <i>·</i> ${relTime(t.updatedAt)}</div>
+        <div class="ticket-ops">
+          <button class="ticket-op" data-edit="${t.id}" title="编辑">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 11V13.5H5l7.4-7.4-2.5-2.5z"/></svg>
+          </button>
+          <button class="ticket-op danger" data-del="${t.id}" title="删除">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4.5h10M6 4.5V3h4v1.5M4.5 4.5l.6 8.2h5.8l.6-8.2"/></svg>
+          </button>
+        </div>
+      </div>`
+      )
+      .join("");
+  }
 
-  $$(".ticket").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      selectTicket(btn.dataset.id);
-      const t = DATA.tickets.find((x) => x.id === btn.dataset.id);
-      if (t) $("#askInput").value = t.title;
-    });
-  });
+  $("#ticketCount").textContent = Store.tickets.length;
+  $$("#statusFilter button").forEach((b) =>
+    b.classList.toggle("is-active", b.dataset.status === Store.filter)
+  );
 }
 
 function selectTicket(id) {
-  $$(".ticket").forEach((b) => b.classList.toggle("is-active", b.dataset.id === id));
+  Store.currentId = id;
+  renderTickets();
+  renderCurrentTicket();
+  const t = Store.current();
+  if (t) $("#askInput").value = t.title;
+}
+
+function renderCurrentTicket() {
+  const t = Store.current();
+  const el = $("#currentTicket");
+  if (!t) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = `
+    <div class="ct-main">
+      <div class="ct-id">${t.id} · ${escapeHtml(t.from)} · ${t.history ? t.history.length : 0} 条操作记录</div>
+      <div class="ct-title">${escapeHtml(t.title)}</div>
+    </div>
+    <div class="ct-ops">
+      <select id="ctStatus" title="变更状态">
+        ${["open", "doing", "done"]
+          .map((s) => `<option value="${s}" ${t.status === s ? "selected" : ""}>${STATUS_TEXT[s]}</option>`)
+          .join("")}
+      </select>
+      <button class="btn btn-quiet" id="ctEdit">编辑</button>
+    </div>`;
+
+  $("#ctStatus").addEventListener("change", async (e) => {
+    try {
+      await Store.updateTicket(t.id, { status: e.target.value, note: "在工单详情条修改状态" });
+      renderTickets();
+      renderCurrentTicket();
+      renderKpi();
+      toast("状态已更新为「" + STATUS_TEXT[e.target.value] + "」");
+    } catch (err) {
+      toast("更新失败：" + err.message);
+    }
+  });
+
+  $("#ctEdit").addEventListener("click", () => openTicketEditor(t.id));
+}
+
+/* ============ 弹窗与表单 ============ */
+let modalSubmit = null;
+
+function openModal({ title, bodyHTML, okText = "保存", onSubmit }) {
+  $("#modalTitle").textContent = title;
+  $("#modalBody").innerHTML = bodyHTML;
+  $("#modalOk").textContent = okText;
+  $("#modalMask").hidden = false;
+  $("#modal").hidden = false;
+  modalSubmit = onSubmit;
+  const first = $("#modalBody input, #modalBody textarea");
+  if (first) setTimeout(() => first.focus(), 60);
+}
+
+function closeModal() {
+  $("#modalMask").hidden = true;
+  $("#modal").hidden = true;
+  modalSubmit = null;
+}
+
+function formError(msg) {
+  let el = $("#modalBody .form-error");
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "form-error";
+    $("#modalBody").appendChild(el);
+  }
+  el.textContent = msg;
+}
+
+const PRI_OPTS = ["P0", "P1", "P2"];
+const TAG_POOL = ["账号权限", "审批流", "数据核对", "库存", "费用", "变更管理", "接口"];
+
+function openTicketEditor(id) {
+  const t = id ? Store.tickets.find((x) => x.id === id) : null;
+  const v = t || { title: "", from: "", pri: "P1", desc: "" };
+  openModal({
+    title: t ? "编辑工单 " + t.id : "新建工单",
+    okText: t ? "保存修改" : "创建工单",
+    bodyHTML: `
+      <div class="form-field">
+        <label>问题描述（写业务同事的原话最好）</label>
+        <input type="text" id="fTitle" value="${escapeHtml(v.title)}" placeholder="例：新来的业务员登不进金蝶" />
+      </div>
+      <div class="form-row">
+        <div class="form-field">
+          <label>提报部门</label>
+          <input type="text" id="fFrom" value="${escapeHtml(v.from)}" placeholder="例：厦门经销部" />
+        </div>
+        <div class="form-field">
+          <label>优先级</label>
+          <select id="fPri">${PRI_OPTS.map((p) => `<option ${p === v.pri ? "selected" : ""}>${p}</option>`).join("")}</select>
+        </div>
+      </div>
+      <div class="form-field">
+        <label>补充说明（选填）</label>
+        <textarea id="fDesc" placeholder="影响范围、已经试过哪些操作">${escapeHtml(v.desc || "")}</textarea>
+      </div>
+      <div class="form-hint">创建后可在右侧让 AI 分诊；每次状态变更都会记进工单的操作记录。</div>`,
+    onSubmit: async () => {
+      const title = $("#fTitle").value.trim();
+      if (!title) {
+        formError("问题描述不能为空");
+        return false;
+      }
+      const data = {
+        title,
+        from: $("#fFrom").value.trim() || "未知部门",
+        pri: $("#fPri").value,
+        desc: $("#fDesc").value.trim()
+      };
+      if (t) {
+        await Store.updateTicket(t.id, Object.assign({}, data, { note: "编辑了工单内容" }));
+        toast("工单已更新");
+      } else {
+        const created = await Store.createTicket(data);
+        Store.currentId = created.id;
+        toast("已创建 " + created.id);
+      }
+      renderTickets();
+      renderCurrentTicket();
+      renderKpi();
+      return true;
+    }
+  });
+}
+
+function openKbEditor() {
+  openModal({
+    title: "新建知识条目",
+    okText: "保存并归档",
+    bodyHTML: `
+      <div class="form-field">
+        <label>标题</label>
+        <input type="text" id="kTitle" placeholder="例：经销商对账单导出乱码的处理方法" />
+      </div>
+      <div class="form-field">
+        <label>一句话摘要</label>
+        <textarea id="kDesc" placeholder="什么场景下用，关键结论是什么"></textarea>
+      </div>
+      <div class="form-field">
+        <label>标签（可多选）</label>
+        <div class="tag-picker" id="kTags">${TAG_POOL.map((t) => `<button type="button" class="tag-opt" data-tag="${t}">${t}</button>`).join("")}</div>
+      </div>`,
+    onSubmit: async () => {
+      const title = $("#kTitle").value.trim();
+      if (!title) {
+        formError("标题不能为空");
+        return false;
+      }
+      const tags = $$("#kTags .tag-opt.on").map((b) => b.dataset.tag);
+      await Store.createKb({ title, desc: $("#kDesc").value.trim(), tags, ai: false });
+      renderKb();
+      toast("已归档到知识库");
+      return true;
+    }
+  });
+  $$("#kTags .tag-opt").forEach((b) => b.addEventListener("click", () => b.classList.toggle("on")));
+}
+
+function openChangeEditor() {
+  openModal({
+    title: "记录一次发布",
+    okText: "记录并归档",
+    bodyHTML: `
+      <div class="form-row">
+        <div class="form-field"><label>版本号</label><input type="text" id="cVer" value="v2.4.2" /></div>
+        <div class="form-field"><label>结果</label><select id="cTag"><option>已发布</option><option>已回滚</option></select></div>
+      </div>
+      <div class="form-field">
+        <label>变更内容</label>
+        <input type="text" id="cTitle" placeholder="例：OA 报销流程增加兜底审批人" />
+      </div>
+      <div class="form-field">
+        <label>验证项（逗号分隔）</label>
+        <input type="text" id="cChecks" placeholder="新增单据验证, 在途单据重算, 财务回归" />
+      </div>
+      <div class="form-field">
+        <label>备注</label>
+        <textarea id="cNote" placeholder="发布后观察到的变化"></textarea>
+      </div>`,
+    onSubmit: async () => {
+      const title = $("#cTitle").value.trim();
+      if (!title) {
+        formError("变更内容不能为空");
+        return false;
+      }
+      const checks = $("#cChecks")
+        .value.split(/[,，\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      await Store.createChange({
+        version: $("#cVer").value.trim() || "v2.4.2",
+        tag: $("#cTag").value,
+        title,
+        checks,
+        note: $("#cNote").value.trim()
+      });
+      renderChanges();
+      toast("发布记录已归档");
+      return true;
+    }
+  });
+}
+
+function confirmDeleteTicket(id) {
+  const t = Store.tickets.find((x) => x.id === id);
+  if (!t) return;
+  openModal({
+    title: "删除工单 " + id,
+    okText: "确认删除",
+    bodyHTML: `<p style="font-size:13px;line-height:1.8;color:var(--ink-2)">
+      将永久删除「${escapeHtml(t.title)}」及其 ${t.history ? t.history.length : 0} 条操作记录，不可撤销。
+    </p>`,
+    onSubmit: async () => {
+      await Store.deleteTicket(id);
+      renderTickets();
+      renderCurrentTicket();
+      renderKpi();
+      toast("工单已删除");
+      return true;
+    }
+  });
 }
 
 function renderAskChips() {
@@ -494,7 +981,8 @@ async function renderTriage(slot, r, source) {
 
     <div class="reply-foot" id="replyFoot" style="opacity:0">
       <button class="btn btn-primary" id="adoptBtn">采纳并关闭工单</button>
-      <button class="btn btn-ghost" id="forwardBtn">转派二线</button>
+      <button class="btn btn-ghost" id="saveKbBtn">沉淀为知识</button>
+      <button class="btn btn-quiet" id="forwardBtn">转派二线</button>
       <button class="btn btn-quiet" id="copyReply">复制话术</button>
       <span class="source-tag ${source === "live" ? "is-live" : ""}">
         ${source === "live" ? "由 deepseek-chat 实时生成" : source === "no_key" ? "演示答案 · 未配置模型 Key" : "演示答案 · 模型未连通"} · 需人工确认
@@ -520,8 +1008,67 @@ async function renderTriage(slot, r, source) {
   $("#replyFoot").style.opacity = "1";
 
   $("#copyReply").addEventListener("click", () => copyText(r.reply, "话术已复制"));
-  $("#adoptBtn").addEventListener("click", () => toast("已采纳，工单 WX-2481 标记为已解决"));
-  $("#forwardBtn").addEventListener("click", () => toast("已转派给二线开发组"));
+
+  $("#adoptBtn").addEventListener("click", async () => {
+    const cur = Store.current();
+    if (!cur) {
+      toast("先在左侧选中一条工单");
+      return;
+    }
+    try {
+      await Store.updateTicket(cur.id, {
+        status: "done",
+        note: "采纳 AI 分诊结论（" + r.category + " / " + r.priority + "），关闭工单"
+      });
+      renderTickets();
+      renderCurrentTicket();
+      renderKpi();
+      toast(cur.id + " 已标记为已解决");
+    } catch (err) {
+      toast("操作失败：" + err.message);
+    }
+  });
+
+  $("#saveKbBtn").addEventListener("click", async () => {
+    const cur = Store.current();
+    const base = cur ? cur.title : r.category;
+    try {
+      await Store.createKb({
+        title: base.slice(0, 26) + " —— 处理路径",
+        desc: r.basis,
+        tags: [r.category.replace(/与.*$/, ""), "工单沉淀"],
+        ai: true,
+        doc: {
+          sections: [
+            { h: "适用场景", p: r.basis, type: "p" },
+            { h: "操作步骤", type: "ol", items: r.steps.map((s) => s.t + "：" + s.d) },
+            { h: "可直接回复的话术", p: r.reply, type: "p" }
+          ]
+        }
+      });
+      renderKb();
+      toast("已沉淀到知识库");
+    } catch (err) {
+      toast("沉淀失败：" + err.message);
+    }
+  });
+
+  $("#forwardBtn").addEventListener("click", async () => {
+    const cur = Store.current();
+    if (!cur) {
+      toast("先在左侧选中一条工单");
+      return;
+    }
+    try {
+      await Store.updateTicket(cur.id, { status: "doing", note: "转派给二线开发组" });
+      renderTickets();
+      renderCurrentTicket();
+      renderKpi();
+      toast("已转派，状态改为处理中");
+    } catch (err) {
+      toast("操作失败：" + err.message);
+    }
+  });
 }
 
 /* ============ 数据核对 ============ */
@@ -715,29 +1262,64 @@ async function explainDiff() {
 
 /* ============ 知识库 ============ */
 function renderKb() {
-  $("#kbPanel").innerHTML = DATA.kb
+  const box = $("#kbPanel");
+
+  if (!Store.kb.length) {
+    box.innerHTML = `<div class="kb-empty">
+      <b>还没有知识条目</b>
+      <span>点右上角「新建条目」，或在工单分诊结果里点「沉淀为知识」。</span>
+    </div>`;
+    return;
+  }
+
+  box.innerHTML = Store.kb
     .map(
       (k) => `
-    <button class="kb-card" data-kb="${k.id}">
+    <div class="kb-card" data-kb="${k.id}">
+      <button class="kb-del" data-kbdel="${k.id}" title="删除条目">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
       <div class="kb-tags">
-        ${k.tags.map((t) => `<span class="kb-tag">${escapeHtml(t)}</span>`).join("")}
+        ${(k.tags || []).map((t) => `<span class="kb-tag">${escapeHtml(t)}</span>`).join("")}
         ${k.ai ? '<span class="kb-tag ai">AI 已校订</span>' : ""}
       </div>
       <h3>${escapeHtml(k.title)}</h3>
       <p>${escapeHtml(k.desc)}</p>
       <div class="kb-foot">
-        <span>被引用 ${k.refs} 次</span>
-        <span>更新 ${k.updated}</span>
+        <span>被引用 ${k.refs || 0} 次</span>
+        <span>更新 ${escapeHtml(k.updated || "")}</span>
         <em>查看 →</em>
       </div>
-    </button>`
+    </div>`
     )
     .join("");
 
-  $$("[data-kb]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const k = DATA.kb.find((x) => x.id === btn.dataset.kb);
+  $$("[data-kb]").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("[data-kbdel]")) return;
+      const k = Store.kb.find((x) => x.id === card.dataset.kb);
       if (k) openKb(k);
+    });
+  });
+
+  $$("[data-kbdel]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const k = Store.kb.find((x) => x.id === btn.dataset.kbdel);
+      if (!k) return;
+      openModal({
+        title: "删除知识条目",
+        okText: "确认删除",
+        bodyHTML: `<p style="font-size:13px;line-height:1.8;color:var(--ink-2)">将删除「${escapeHtml(
+          k.title
+        )}」，此操作不可撤销。</p>`,
+        onSubmit: async () => {
+          await Store.deleteKb(k.id);
+          renderKb();
+          toast("条目已删除");
+          return true;
+        }
+      });
     });
   });
 }
@@ -779,7 +1361,12 @@ function openKb(k) {
 }
 
 function renderChanges() {
-  $("#changePanel").innerHTML = DATA.changes
+  const box = $("#changePanel");
+  if (!Store.changes.length) {
+    box.innerHTML = `<div class="kb-empty"><b>还没有发布记录</b><span>点右上角「记录发布」补一条。</span></div>`;
+    return;
+  }
+  box.innerHTML = Store.changes
     .map(
       (c) => `
     <div class="tl-row">
@@ -789,10 +1376,12 @@ function renderChanges() {
           <span class="tag" style="${c.tag === "已回滚" ? "color:var(--red);border-color:var(--red-line);background:var(--red-soft)" : ""}">${escapeHtml(c.tag)}</span>
         </h3>
         <div class="tl-checks">
-          ${c.checks.map((x) => `<span class="tl-check"><i style="${c.tag === "已回滚" ? "background:var(--ink-3)" : ""}"></i>${escapeHtml(x)}</span>`).join("")}
+          ${(c.checks || [])
+            .map((x) => `<span class="tl-check"><i style="${c.tag === "已回滚" ? "background:var(--ink-3)" : ""}"></i>${escapeHtml(x)}</span>`)
+            .join("")}
         </div>
-        <div class="tl-note">${escapeHtml(c.note)}</div>
-        <div class="tl-note" style="font-size:11px">发布人 · ${escapeHtml(c.by)}</div>
+        <div class="tl-note">${escapeHtml(c.note || "")}</div>
+        <div class="tl-note" style="font-size:11px">发布人 · ${escapeHtml(c.by || "")}</div>
       </div>
     </div>`
     )
@@ -806,6 +1395,7 @@ function initKbTabs() {
       const isKb = b.dataset.tab === "kb";
       $("#kbPanel").hidden = !isKb;
       $("#changePanel").hidden = isKb;
+      $("#newKbBtn").textContent = isKb ? "新建条目" : "记录发布";
     });
   });
 }
@@ -878,6 +1468,7 @@ function initStoryKeys() {
         setRoute("dashboard");
         return;
       }
+      if (!$("#modal").hidden) return closeModal();
       if (!$("#drawer").hidden) return closeDrawer();
     }
 
@@ -1022,16 +1613,19 @@ async function checkAI() {
 }
 
 /* ============ 初始化 ============ */
-function init() {
+async function init() {
   const params = new URLSearchParams(location.search);
   if (params.get("noanim") === "1") document.body.classList.add("no-anim");
 
   initNav();
+  await Store.init();
+
   renderKpi();
   renderTrend();
   renderDonut();
   renderRisks();
   renderTickets();
+  renderCurrentTicket();
   renderAskChips();
   renderSqlChips();
   renderKb();
@@ -1085,7 +1679,73 @@ function init() {
     }
   });
 
-  $("#ticketItems").firstElementChild && selectTicket(DATA.tickets[0].id);
+  /* ---- 增删改查入口 ---- */
+  $("#newTicketBtn").addEventListener("click", () => openTicketEditor(null));
+
+  $("#newKbBtn").addEventListener("click", () => {
+    const tab = $("#kbTabs .is-active");
+    if (tab && tab.dataset.tab === "changes") openChangeEditor();
+    else openKbEditor();
+  });
+
+  $("#resetBtn").addEventListener("click", () => {
+    openModal({
+      title: "重置演示数据",
+      okText: "确认重置",
+      bodyHTML: `<p style="font-size:13px;line-height:1.8;color:var(--ink-2)">
+        会把工单、知识库、变更记录恢复成初始状态，你新增或修改的内容会全部丢失。
+      </p>`,
+      onSubmit: async () => {
+        await Store.reset();
+        renderKpi();
+        renderTickets();
+        renderCurrentTicket();
+        renderKb();
+        renderChanges();
+        toast("已恢复初始数据");
+        return true;
+      }
+    });
+  });
+
+  $$("#statusFilter button").forEach((b) => {
+    b.addEventListener("click", () => {
+      Store.filter = b.dataset.status;
+      renderTickets();
+    });
+  });
+
+  $("#ticketItems").addEventListener("click", (e) => {
+    const edit = e.target.closest("[data-edit]");
+    if (edit) {
+      openTicketEditor(edit.dataset.edit);
+      return;
+    }
+    const del = e.target.closest("[data-del]");
+    if (del) {
+      confirmDeleteTicket(del.dataset.del);
+      return;
+    }
+    const row = e.target.closest(".ticket");
+    if (row) selectTicket(row.dataset.id);
+  });
+
+  $("#modalOk").addEventListener("click", async () => {
+    if (!modalSubmit) return;
+    const btn = $("#modalOk");
+    btn.disabled = true;
+    try {
+      const ok = await modalSubmit();
+      if (ok !== false) closeModal();
+    } catch (err) {
+      formError(err.message || "操作失败");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $("#modalCancel").addEventListener("click", closeModal);
+  $("#modalClose").addEventListener("click", closeModal);
+  $("#modalMask").addEventListener("click", closeModal);
 
   $("#triageResult").innerHTML = `
     <div class="triage-empty">
@@ -1109,7 +1769,15 @@ function init() {
     setRoute("sql");
     $("#sqlInput").value = DATA.sqlCases[0].question;
     runSql();
+  } else if (params2.get("panel") === "new") {
+    setRoute("tickets");
+    openTicketEditor(null);
+  } else if (params2.get("panel") === "kb") {
+    setRoute("knowledge");
+    openKbEditor();
   }
 }
 
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener("DOMContentLoaded", () => {
+  init().catch((err) => console.error("[init] 失败", err));
+});

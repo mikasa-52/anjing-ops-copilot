@@ -148,8 +148,20 @@
         <div class="ticket-layout">
           <div class="card ticket-panel">
             <div class="card-head">
-              <h2>待处理</h2>
-              <span class="tag" id="ticketCount">12</span>
+              <h2>工单</h2>
+              <div class="panel-tools">
+                <span class="tag" id="ticketCount">0</span>
+                <button class="btn btn-primary btn-xs" id="newTicketBtn">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 3.5v9M3.5 8h9"/></svg>
+                  新建
+                </button>
+              </div>
+            </div>
+            <div class="segmented mini" id="statusFilter">
+              <button class="is-active" data-status="all">全部</button>
+              <button data-status="open">待处理</button>
+              <button data-status="doing">处理中</button>
+              <button data-status="done">已解决</button>
             </div>
             <div class="ticket-items" id="ticketItems"></div>
           </div>
@@ -174,6 +186,8 @@
                 </button>
               </div>
             </div>
+
+            <div class="current-ticket" id="currentTicket" hidden></div>
 
             <div id="triageResult" class="triage-slot"></div>
           </div>
@@ -241,10 +255,15 @@
             <p>工单结案后自动沉淀 FAQ 与操作手册，每次发布都留验证痕迹</p>
           </div>
           <div class="head-actions">
+            <button class="btn btn-ghost btn-sm" id="resetBtn" title="把演示数据恢复成初始状态">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 8a5.5 5.5 0 1 0 1.7-4M2.5 2.5V6h3.5"/></svg>
+              重置数据
+            </button>
             <div class="segmented" id="kbTabs">
               <button class="is-active" data-tab="kb">知识库</button>
               <button data-tab="changes">变更记录</button>
             </div>
+            <button class="btn btn-primary" id="newKbBtn">新建条目</button>
           </div>
         </div>
 
@@ -254,6 +273,21 @@
 
     </div>
   </main>
+</div>
+
+<div class="modal-mask" id="modalMask" hidden></div>
+<div class="modal" id="modal" hidden>
+  <div class="modal-head">
+    <h2 id="modalTitle">新建工单</h2>
+    <button class="icon-btn" id="modalClose" aria-label="关闭">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
+  </div>
+  <div class="modal-body" id="modalBody"></div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" id="modalCancel">取消</button>
+    <button class="btn btn-primary" id="modalOk">保存</button>
+  </div>
 </div>
 
 <div class="drawer-mask" id="drawerMask" hidden></div>

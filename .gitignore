@@ -1,6 +1,9 @@
 # 本地密钥，绝不提交
 .env
 
+# 运行时数据（部署时会重新生成种子）
+data/store.json
+
 node_modules/
 *.log
 .DS_Store
