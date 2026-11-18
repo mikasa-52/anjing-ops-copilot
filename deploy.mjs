@@ -124,6 +124,18 @@ async function api(pathname, { method = 'GET', body } = {}) {
   }
 
   log('▶ 3/6 提交文件（单次提交）…');
+
+  // 自动同步 public → docs，避免改了源文件忘记同步静态目录
+  const SRC = path.resolve('public');
+  if (fs.existsSync(SRC)) {
+    fs.mkdirSync(path.resolve('docs'), { recursive: true });
+    for (const f of ['index.html', 'styles.css', 'app.js', 'data.js']) {
+      const from = path.join(SRC, f);
+      if (fs.existsSync(from)) fs.copyFileSync(from, path.resolve('docs', f));
+    }
+    log('   已同步 public → docs');
+  }
+
   const payload = [];
   for (const file of FILES) {
     const full = path.resolve(file);

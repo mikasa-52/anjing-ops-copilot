@@ -61,6 +61,25 @@ DEEPSEEK_MODEL=deepseek-chat
 
 ---
 
+## 部署到 GitHub Pages
+
+已部署地址：**https://mikasa-52.github.io/anjing-ops-copilot/**
+
+改了代码要重新发布时，一条命令：
+
+```bash
+# 需要 classic token，勾选 repo 权限
+GITHUB_TOKEN=ghp_xxx node deploy.mjs
+```
+
+脚本做四件事：同步 `public/` → `docs/`、用 Git Data API 单次提交、把 Pages 指向 `main /docs`、等待构建并验证链接可访问。
+
+**为什么不用 `git push`**：这套流程是为「`github.com` 不可达、但 `api.github.com` 可用」的网络环境写的，全程走 REST API 提交。空仓库会先用 Contents API 播种一个初始提交，再走 blob / tree / commit 流程。
+
+> Pages 只托管静态文件，AI 会降级为预置答案（左下角显示「静态版 · 演示答案」）。要真实模型能力，请本地运行 `node server.js`。
+
+---
+
 ## 目录结构
 
 ```
