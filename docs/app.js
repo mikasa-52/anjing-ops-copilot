@@ -1111,7 +1111,7 @@ function matchCase(text) {
 }
 
 let sqlBusy = false;
-let currentCase = null;
+let currentSql = "";
 
 async function runSql() {
   const q = $("#sqlInput").value.trim();
@@ -1125,90 +1125,106 @@ async function runSql() {
   $("#sqlBtn").disabled = true;
 
   const c = matchCase(q);
-  currentCase = c;
+
+  $("#sqlMeta").textContent = "正在生成语句…";
+  $("#sqlCode").innerHTML = `<span class="cm">-- 正在解析问句…</span>`;
+  $("#sqlTable").innerHTML = `<div class="thinking"><i></i><i></i><i></i><span>定位数据表、拼装核对口径…</span></div>`;
+  $("#resultMeta").textContent = "演示原型不连接数据库，只生成可执行语句";
+
+  let sqlText = "";
+  let note = "";
+  let fromAI = false;
 
   if (c) {
-    $("#sqlMeta").textContent = "根据自然语言生成 · " + c.note;
-    $("#sqlCode").innerHTML = `<span class="cm">-- 正在生成…</span>`;
-    $("#sqlTable").innerHTML = `<div class="thinking"><i></i><i></i><i></i><span>解析问句、定位数据表、生成核对语句…</span></div>`;
-    $("#resultMeta").textContent = "演示数据 · 未连接生产库";
-
-    await sleep(620);
-    $("#sqlCode").innerHTML = highlightSQL(c.sql);
-    await sleep(240);
-    renderTable(c);
-    $("#explainBtn").disabled = false;
+    sqlText = c.sql;
+    note = c.note;
+    await sleep(520);
   } else {
-    $("#sqlMeta").textContent = "自由提问 · 由模型生成，未在演示库执行";
-    $("#sqlCode").innerHTML = `<span class="cm">-- 正在生成…</span>`;
-    $("#sqlTable").innerHTML = `<div class="thinking"><i></i><i></i><i></i><span>正在理解问句…</span></div>`;
-
-    let sqlText = "";
-    let source = "fallback";
     try {
       const resp = await callAI({
-        system: "你是熟悉金蝶云星空与 SQL Server 的数据分析师。根据用户问题生成一条可直接执行的 T-SQL 查询，只用 SELECT，不要写注释以外的说明。返回 JSON：{\"sql\":\"...\",\"note\":\"一句话说明口径\"}",
-        user: `可用表：fact_order(order_no, dealer_code, order_date, amount, status, post_date)、dim_dealer(dealer_code, dealer_name, region)、oa_flow_instance(doc_no, doc_type, amount, applicant_id, node_name, node_enter_time, state)、dim_user(user_id, dept_name)。\n\n问题：${q}`,
+        system:
+          "你是熟悉金蝶云星空报表结构的数据分析师。根据业务问题写出一条可直接执行的 SQL Server 查询，只用 SELECT，不要输出注释以外的解释。返回 JSON：{\"sql\":\"...\",\"note\":\"一句话说明口径\"}",
+        user:
+          "可用表：fact_order(order_no, dealer_code, order_date, amount, status, post_date)、dim_dealer(dealer_code, dealer_name, region, credit_limit)、oa_flow_instance(doc_no, doc_type, amount, applicant_id, dept_name, node_name, node_enter_time, state)。\n\n问题：" +
+          q,
         json: true
       });
       if (resp.ok && resp.content) {
         const parsed = JSON.parse(resp.content);
-        sqlText = parsed.sql || "";
-        source = "live";
-        $("#sqlMeta").textContent = "自由提问 · " + (parsed.note || "由模型生成，未在演示库执行");
-        $("#explainBtn").disabled = true;
+        sqlText = (parsed.sql || "").trim();
+        note = parsed.note || "";
+        fromAI = true;
       }
     } catch (err) {
       console.warn(err);
     }
-
-    $("#sqlCode").innerHTML = sqlText
-      ? highlightSQL(sqlText)
-      : `<span class="cm">-- 当前未连接模型，无法为自由提问生成 SQL。</span>\n<span class="cm">-- 请点下方示例问题，或配置 .env 中的 DEEPSEEK_API_KEY 后重试。</span>`;
-
-    $("#sqlTable").innerHTML = sqlText
-      ? `<div class="empty-state">
-           <div class="empty-glyph"></div>
-           <p>演示库未连接，语句未执行</p>
-           <span>这句话已经可以直接拿到生产库跑；预设的三个示例问题可查看完整结果与异常标注。</span>
-         </div>`
-      : `<div class="empty-state">
-           <div class="empty-glyph"></div>
-           <p>暂时没有结果</p>
-           <span>点上面任一示例问题，看看完整的核对流程。</span>
-         </div>`;
-    $("#resultMeta").textContent = sqlText ? "语句已生成 · 未执行（" + (source === "live" ? "模型生成" : "演示") + "）" : "演示数据 · 未连接生产库";
   }
+
+  if (!sqlText) {
+    $("#sqlCode").innerHTML =
+      `<span class="cm">-- 当前没有可用的语句</span>\n<span class="cm">-- 可以点上面的示例问题，或配置 .env 里的 DEEPSEEK_API_KEY 让模型现场生成</span>`;
+    $("#sqlMeta").textContent = "未生成";
+    $("#sqlTable").innerHTML = `<div class="empty-state">
+      <div class="empty-glyph"></div>
+      <p>没有拿到语句</p>
+      <span>点上面任一示例问题，直接看现成的核对语句</span>
+    </div>`;
+    $("#sqlBtn").disabled = false;
+    sqlBusy = false;
+    return;
+  }
+
+  currentSql = sqlText;
+  $("#sqlMeta").textContent = (fromAI ? "由模型生成" : "预设核对语句") + (note ? " · " + note : "");
+  $("#sqlCode").innerHTML = highlightSQL(sqlText);
+  renderSqlBrief(sqlText, note, fromAI);
 
   $("#sqlBtn").disabled = false;
   sqlBusy = false;
 }
 
-function renderTable(c) {
-  const head = c.cols.map((col) => `<th style="${col.num ? "text-align:right" : ""}">${escapeHtml(col.label)}</th>`).join("");
-  const body = c.rows
-    .map((row) => {
-      const tds = c.cols
-        .map((col) => {
-          let val = row[col.key];
-          if (col.key === "diff" && row.flag) {
-            return `<td class="num"><span class="delta-flag" data-tip="${escapeHtml(row.tip || "")}">${escapeHtml(val)}</span></td>`;
-          }
-          return `<td class="${col.num ? "num" : ""}">${escapeHtml(val)}</td>`;
-        })
-        .join("");
-      return `<tr class="${row.flag ? "anomaly" : ""}">${tds}</tr>`;
-    })
-    .join("");
+/* 结果区不放假表格，改成语句说明 —— 不假装执行过 */
+function renderSqlBrief(sql, note, fromAI) {
+  const lineCount = sql.split("\n").length;
 
-  const flagged = c.rows.filter((r) => r.flag).length;
-  $("#sqlTable").innerHTML = `<table class="data"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
-  $("#resultMeta").textContent = `${c.rows.length} 行结果 · ${flagged} 行需要关注 · 演示数据`;
-
-  const firstAnomaly = $("tr.anomaly");
-  if (firstAnomaly) {
-    firstAnomaly.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  /* 优先匹配已知业务表，避免把 CTE 名（cur / prev）当成表 */
+  const KNOWN = ["fact_order", "dim_dealer", "oa_flow_instance", "dim_user"];
+  let tables = KNOWN.filter((t) => new RegExp("\\b(?:from|join)\\s+" + t + "\\b", "i").test(sql));
+  if (!tables.length) {
+    tables = Array.from(
+      new Set(
+        (sql.match(/\b(?:from|join)\s+([a-z_][a-z0-9_]*)/gi) || []).map((m) =>
+          m.replace(/\b(from|join)\s+/i, "").toLowerCase()
+        )
+      )
+    );
   }
+
+  $("#resultMeta").textContent = "只读查询 · 可复制到生产库执行";
+  $("#sqlTable").innerHTML = `
+    <div class="brief">
+      <div class="brief-row">
+        <span class="brief-k">核对口径</span>
+        <p>${escapeHtml(note || "按问题自动生成的核对语句。")}</p>
+      </div>
+      <div class="brief-row">
+        <span class="brief-k">涉及数据表</span>
+        <div class="brief-tags">${tables.map((t) => `<code>${escapeHtml(t)}</code>`).join("") || "<code>—</code>"}</div>
+      </div>
+      <div class="brief-row">
+        <span class="brief-k">语句规模</span>
+        <p>${lineCount} 行 · 仅 SELECT / WITH，不含任何写操作</p>
+      </div>
+      <div class="brief-row">
+        <span class="brief-k">下一步</span>
+        <p>复制到生产库或报表工具执行；结果里的异常行仍需业务方确认，不自动处理。</p>
+      </div>
+      ${
+        fromAI
+          ? '<p class="brief-note">这句由模型按表结构现场生成，首次执行前建议先看一次执行计划。</p>'
+          : ""
+      }
+    </div>`;
 }
 
 function renderSqlChips() {
@@ -1221,43 +1237,6 @@ function renderSqlChips() {
       runSql();
     });
   });
-}
-
-async function explainDiff() {
-  if (!currentCase) return;
-  const c = currentCase;
-  openDrawer({
-    tag: "差异说明",
-    title: "数据核对结论",
-    bodyHTML: `<div class="doc"><p style="color:var(--ink-3)">正在整理结论…</p></div>`,
-    primary: "复制并归档",
-    onPrimary: () => copyText(c.summary, "结论已复制")
-  });
-
-  const rowsText = c.rows
-    .map((r) => Object.keys(r).filter((k) => k !== "tip" && k !== "flag").map((k) => r[k]).join(" | "))
-    .join("\n");
-
-  let content = "";
-  try {
-    const resp = await callAI({
-      system: "你是财务与业务数据核对方面的分析师。根据查询结果写一段可直接进入月度复盘的中文差异说明，客观、给出结论与建议，不要编造数据。返回 JSON：{\"html\":\"<p>...</p>\"}，html 只用 p、ul、li、strong 标签。",
-      user: `问题：${c.question}\n口径：${c.note}\n结果（列顺序：${c.cols.map((x) => x.label).join(" | ")}）：\n${rowsText}\n\n异常行的业务解释：\n${c.rows.filter((r) => r.flag).map((r) => "- " + r.tip).join("\n")}`,
-      json: true
-    });
-    if (resp.ok && resp.content) {
-      const parsed = JSON.parse(resp.content);
-      content = parsed.html || "";
-    }
-  } catch (err) {
-    console.warn(err);
-  }
-
-  if (!content) {
-    content = `<p>${escapeHtml(c.summary)}</p><p class="doc-note">当前为演示结论，配置模型 Key 后可由 AI 根据实际结果即时生成。</p>`;
-  }
-
-  $("#drawerBody").innerHTML = `<div class="doc">${content}</div>`;
 }
 
 /* ============ 知识库 ============ */
@@ -1654,7 +1633,6 @@ async function init() {
   $("#sqlInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") runSql();
   });
-  $("#explainBtn").addEventListener("click", explainDiff);
   $("#copySql").addEventListener("click", () => {
     const text = $("#sqlCode").textContent;
     if (text && !text.includes("输入问题后")) copyText(text, "SQL 已复制");

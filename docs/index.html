@@ -198,7 +198,7 @@
         <div class="page-head">
           <div>
             <h1>数据核对台</h1>
-            <p>中文提问 → 生成 SQL → 异常行自动标出 → 一键写出差异说明</p>
+            <p>中文提问 → 生成可直接执行的核对语句，附口径与涉及表</p>
           </div>
           <div class="head-actions">
             <span class="tag">演示库：ERP_REPORT</span>
@@ -230,19 +230,15 @@
         <div class="card result-card">
           <div class="card-head">
             <div>
-              <h2>执行结果</h2>
-              <p class="sub" id="resultMeta">演示数据 · 未连接生产库</p>
+              <h2>语句说明</h2>
+              <p class="sub" id="resultMeta">演示原型不连接数据库，只生成可执行语句</p>
             </div>
-            <button class="btn btn-ghost" id="explainBtn" disabled>
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 1.8l1.5 4.2 4.2 1.5-4.2 1.5L8 13.2 6.5 9 2.3 7.5 6.5 6z"/></svg>
-              生成差异说明
-            </button>
           </div>
           <div id="sqlTable" class="table-slot">
             <div class="empty-state">
               <div class="empty-glyph"></div>
-              <p>还没有执行结果</p>
-              <span>点上面的示例问题试试，比如「上月与本月订单金额差异」</span>
+              <p>还没有生成语句</p>
+              <span>点上面的示例问题，或直接描述你要核对什么</span>
             </div>
           </div>
         </div>

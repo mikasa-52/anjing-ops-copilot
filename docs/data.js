@@ -132,122 +132,22 @@ DATA.triageSample = "新来的业务员登不进金蝶，提示账号未授权";
 /* ============ 数据核对 ============ */
 DATA.sqlCases = [
   {
-    key: "dealer",
-    question: "本月经销商订单金额和上月比，差异超过 10% 的有哪些",
-    note: "关联经销商主数据与订单事实表，按自然月聚合后计算环比，仅保留已审核订单。",
-    sql: `WITH cur AS (
-  SELECT d.dealer_code,
-         d.dealer_name,
-         SUM(o.amount) AS amt_cur
-  FROM   fact_order o
-  JOIN   dim_dealer d ON d.dealer_code = o.dealer_code
-  WHERE  o.order_date >= '2026-11-01'
-    AND  o.order_date <  '2026-12-01'
-    AND  o.status = 'APPROVED'
-  GROUP BY d.dealer_code, d.dealer_name
-),
-prev AS (
-  SELECT d.dealer_code,
-         SUM(o.amount) AS amt_prev
-  FROM   fact_order o
-  JOIN   dim_dealer d ON d.dealer_code = o.dealer_code
-  WHERE  o.order_date >= '2026-10-01'
-    AND  o.order_date <  '2026-11-01'
-    AND  o.status = 'APPROVED'
-  GROUP BY d.dealer_code
-)
-SELECT c.dealer_code,
-       c.dealer_name,
-       c.amt_cur,
-       p.amt_prev,
-       ROUND((c.amt_cur - p.amt_prev)
-             / NULLIF(p.amt_prev, 0) * 100, 2) AS diff_pct
-FROM   cur c
-LEFT JOIN prev p ON p.dealer_code = c.dealer_code
-WHERE  ABS((c.amt_cur - p.amt_prev)
-           / NULLIF(p.amt_prev, 0) * 100) > 10
-ORDER BY ABS(diff_pct) DESC;`,
-    cols: [
-      { key: "code", label: "经销商编码" },
-      { key: "name", label: "经销商名称" },
-      { key: "cur", label: "本月金额", num: true },
-      { key: "prev", label: "上月金额", num: true },
-      { key: "diff", label: "环比", num: true }
-    ],
-    rows: [
-      { code: "XM-0182", name: "厦门鑫鲜达贸易", cur: "486,200.00", prev: "512,800.00", diff: "-5.19%" },
-      { code: "XM-0231", name: "泉州海润食品", cur: "1,204,650.00", prev: "771,300.00", diff: "+56.18%", flag: true, tip: "本月新增 3 张团购大单，合计 43.6 万，属正常增长，已与销售确认。" },
-      { code: "ZZ-0104", name: "漳州顺发冷链", cur: "318,900.00", prev: "306,200.00", diff: "+4.15%" },
-      { code: "FZ-0057", name: "福州闽丰供应链", cur: "92,400.00", prev: "268,700.00", diff: "-65.61%", flag: true, tip: "该客户 10 月起转由直营团队对接，订单改走 FZ-0058 账号，非业务流失。" },
-      { code: "XM-0166", name: "厦门佳味商贸", cur: "655,100.00", prev: "641,900.00", diff: "+2.06%" },
-      { code: "LY-0029", name: "龙岩恒泰食品", cur: "204,300.00", prev: "208,100.00", diff: "-1.83%" }
-    ],
-    summary: "共比对 42 家经销商，2 家环比波动超过 10%。泉州海润为团购放量带来的真实增长；福州闽丰属客户归属调整，报表口径需同步修正，否则月度复盘会误判为流失。"
+    "key": "dealer",
+    "question": "本月经销商订单金额和上月比，差异超过 10% 的有哪些",
+    "note": "关联经销商主数据与订单事实表，按自然月聚合已审核订单，计算环比并筛出波动超过 10% 的。",
+    "sql": "WITH cur AS (\n    SELECT d.dealer_code,\n           d.dealer_name,\n           SUM(o.amount) AS amt_cur\n    FROM   fact_order o\n    JOIN   dim_dealer d ON d.dealer_code = o.dealer_code\n    WHERE  o.order_date >= '2026-11-01'\n      AND  o.order_date <= '2026-11-18'\n      AND  o.status = 'APPROVED'\n    GROUP BY d.dealer_code, d.dealer_name\n),\nprev AS (\n    SELECT d.dealer_code,\n           SUM(o.amount) AS amt_prev\n    FROM   fact_order o\n    JOIN   dim_dealer d ON d.dealer_code = o.dealer_code\n    WHERE  o.order_date >= '2026-10-01'\n      AND  o.order_date <  '2026-11-01'\n      AND  o.status = 'APPROVED'\n    GROUP BY d.dealer_code\n)\nSELECT c.dealer_code                                   AS \"经销商编码\",\n       c.dealer_name                                   AS \"经销商名称\",\n       ROUND(c.amt_cur, 2)                             AS \"本月金额\",\n       ROUND(IFNULL(p.amt_prev, 0), 2)                  AS \"上月金额\",\n       ROUND((c.amt_cur - IFNULL(p.amt_prev, 0)) * 100.0\n             / NULLIF(p.amt_prev, 0), 2)               AS \"环比%\"\nFROM   cur c\nLEFT JOIN prev p ON p.dealer_code = c.dealer_code\nWHERE  ABS((c.amt_cur - IFNULL(p.amt_prev, 0)) * 100.0\n           / NULLIF(p.amt_prev, 0)) > 10\nORDER BY ABS((c.amt_cur - IFNULL(p.amt_prev, 0)) * 100.0\n             / NULLIF(p.amt_prev, 0)) DESC;"
   },
   {
-    key: "approval",
-    question: "上周所有审批超过 3 天还没走完的单据",
-    note: "按流程实例的当前节点停留时长计算，排除已撤回与已作废单据。",
-    sql: `SELECT f.doc_no,
-       f.doc_type,
-       f.amount,
-       u.dept_name,
-       f.node_name,
-       DATEDIFF(DAY, f.node_enter_time, GETDATE()) AS stuck_days
-FROM   oa_flow_instance f
-JOIN   dim_user u ON u.user_id = f.applicant_id
-WHERE  f.state = 'RUNNING'
-  AND  f.node_enter_time >= DATEADD(DAY, -14, GETDATE())
-  AND  DATEDIFF(DAY, f.node_enter_time, GETDATE()) > 3
-ORDER BY stuck_days DESC;`,
-    cols: [
-      { key: "no", label: "单据号" },
-      { key: "type", label: "单据类型" },
-      { key: "amount", label: "金额", num: true },
-      { key: "dept", label: "申请部门" },
-      { key: "node", label: "当前节点" },
-      { key: "days", label: "已停留", num: true }
-    ],
-    rows: [
-      { no: "BX-20261112-041", type: "费用报销", amount: "12,480.00", dept: "市场部", node: "财务复核", days: "6 天", flag: true, tip: "该节点审批人 11 月 10 日起休假，未设置代理人，属于典型单点阻塞。" },
-      { no: "FK-20261113-007", type: "付款申请", amount: "286,000.00", dept: "采购部", node: "总经理审批", days: "5 天", flag: true, tip: "金额超过 20 万需总经理审批，当前为月末集中审批期，建议提前批量处理。" },
-      { no: "BX-20261114-019", type: "费用报销", amount: "3,260.00", dept: "行政部", node: "部门负责人", days: "4 天" },
-      { no: "CG-20261114-003", type: "采购申请", amount: "48,900.00", dept: "生产部", node: "财务复核", days: "4 天" },
-      { no: "BX-20261115-028", type: "费用报销", amount: "1,880.00", dept: "销售部", node: "部门负责人", days: "3 天" }
-    ],
-    summary: "5 张在途单据超过 3 天，合计金额 35.3 万。其中 2 张属人为阻塞：一张审批人休假未设代理，一张卡在总经理节点。建议对超过 3 天的节点启用自动提醒，并对休假人员强制指定代理人。"
+    "key": "approval",
+    "question": "上周所有审批超过 3 天还没走完的单据",
+    "note": "按流程实例当前节点的停留时长计算，只看仍在运行中的单据。",
+    "sql": "SELECT f.doc_no                                            AS \"单据号\",\n       f.doc_type                                          AS \"单据类型\",\n       ROUND(f.amount, 2)                                  AS \"金额\",\n       f.dept_name                                         AS \"申请部门\",\n       f.node_name                                         AS \"当前节点\",\n       CAST(julianday('now') - julianday(f.node_enter_time)\n            AS INTEGER)                                    AS \"已停留天数\"\nFROM   oa_flow_instance f\nWHERE  f.state = 'RUNNING'\n  AND  julianday('now') - julianday(f.node_enter_time) > 3\nORDER BY \"已停留天数\" DESC;"
   },
   {
-    key: "duplicate",
-    question: "找出重复入账的订单号",
-    note: "以订单号 + 客户 + 金额三要素分组，出现过账次数大于 1 的即视为疑似重复。",
-    sql: `SELECT o.order_no,
-       o.dealer_code,
-       o.amount,
-       COUNT(*)              AS post_times,
-       SUM(o.amount)         AS total_amount,
-       MIN(o.post_date)      AS first_post,
-       MAX(o.post_date)      AS last_post
-FROM   fact_order o
-WHERE  o.status = 'APPROVED'
-  AND  o.post_date >= '2026-10-01'
-GROUP BY o.order_no, o.dealer_code, o.amount
-HAVING COUNT(*) > 1
-ORDER BY total_amount DESC;`,
-    cols: [
-      { key: "no", label: "订单号" },
-      { key: "dealer", label: "客户编码" },
-      { key: "amount", label: "单笔金额", num: true },
-      { key: "times", label: "过账次数", num: true },
-      { key: "total", label: "合计影响", num: true },
-      { key: "range", label: "过账区间" }
-    ],
-    rows: [
-      { no: "SO-20261105-1182", dealer: "XM-0231", amount: "68,400.00", times: "2", total: "136,800.00", range: "11-05 → 11-06", flag: true, tip: "接口重试导致重复过账，第二笔已生成红字冲销单，需确认冲销是否已过账。" },
-      { no: "SO-20261108-0743", dealer: "ZZ-0104", amount: "24,150.00", times: "2", total: "48,300.00", range: "11-08 → 11-08", flag: true, tip: "同一天两笔，间隔 4 分钟，疑似业务员重复提交，需与客户对账后核销。" },
-      { no: "SO-20261111-0361", dealer: "XM-0166", amount: "9,720.00", times: "2", total: "19,440.00", range: "11-11 → 11-12" }
-    ],
-    summary: "近 45 天发现 3 组疑似重复入账，合计虚增收入 20.4 万。其中 1 组已冲销待确认，2 组需与客户对账。建议在订单接口层增加「订单号 + 金额」幂等校验，从源头阻断。"
+    "key": "duplicate",
+    "question": "找出重复入账的订单号",
+    "note": "以订单号 + 客户 + 金额三要素分组，过账次数大于 1 的即视为疑似重复。",
+    "sql": "SELECT order_no              AS \"订单号\",\n       dealer_code           AS \"客户编码\",\n       ROUND(amount, 2)      AS \"单笔金额\",\n       COUNT(*)              AS \"过账次数\",\n       ROUND(SUM(amount), 2) AS \"合计影响\",\n       MIN(post_date)        AS \"首次过账\",\n       MAX(post_date)        AS \"末次过账\"\nFROM   fact_order\nWHERE  status = 'APPROVED'\n  AND  post_date >= '2026-10-01'\nGROUP BY order_no, dealer_code, amount\nHAVING COUNT(*) > 1\nORDER BY \"合计影响\" DESC;"
   }
 ];
 
